@@ -57,6 +57,8 @@ public class MainActivity extends Activity {
     private boolean liveOn;
     private long liveSession;
     private final StringBuilder liveCommitted = new StringBuilder();
+    private String partialText = "";
+    private boolean liveUiPending = false;
     private final List<String> packLangs = new ArrayList<>();
     private Thread micThread;
     private static final String AUTO = "auto (detect)";
@@ -116,14 +118,9 @@ public class MainActivity extends Activity {
         opts.add(0, AUTO);
         langView.setAdapter(new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_dropdown_item, opts));
-        // Default to the pack's first NON-English language (English is the
-        // shared block of every pack and often a wrong default for other langs).
-        int sel = opts.size() > 1 ? 1 : 0; // first real language
-        for (int i = 1; i < opts.size(); i++) {
-            String c = opts.get(i).toLowerCase(java.util.Locale.ROOT);
-            if (!c.equals("en") && !c.equals("eng")) { sel = i; break; }
-        }
-        langView.setSelection(sel);
+        // Default to "auto (detect)": the engine picks the language. This is
+        // safe across packs (a fixed non-English default would break English).
+        langView.setSelection(0);
         status.setText("model loaded: langs " + packLangs
                 + " · chunk=" + TinyAsr.nativeChunkMs(h) + "ms");
         return h;
@@ -319,6 +316,23 @@ public class MainActivity extends Activity {
         if (json != null) handleEvents(json);
     }
 
+    /** Throttled, single-view live update: committed words + current partial,
+     *  updated at most every ~120ms so the text fills in instead of blinking. */
+    private void scheduleUi() {
+        if (liveUiPending) return;
+        liveUiPending = true;
+        getWindow().getDecorView().postDelayed(() -> {
+            liveUiPending = false;
+            String committed = liveCommitted.toString();
+            StringBuilder sb = new StringBuilder(committed);
+            if (!partialText.isEmpty()) {
+                if (sb.length() > 0) sb.append(' ');
+                sb.append(partialText);
+            }
+            result.setText(sb.toString());
+        }, 120);
+    }
+
     /** Apply a JSON event array: commits append, partials replace the live line. */
     private void handleEvents(String json) {
         if (json == null) return;
@@ -357,8 +371,8 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 liveCommitted.setLength(0);
                 liveCommitted.append(committed);
-                result.setText(liveCommitted.toString());
-                partial.setText(part[0].toString());
+                partialText = part[0].toString();
+                scheduleUi();
             });
         } catch (Exception e) {
             // ignore malformed event

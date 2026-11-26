@@ -7,5 +7,7 @@
     <string name="live_file">Live from file — watch words</string>
     <string name="verify">Verify (auto languages)</string>
     <string name="language_label">Language for live/stream</string>
+    <string name="ime_title">tinyasr dictation</string>
+    <string name="ime_dictate">Hold to talk / dictation</string>
     <string name="status_idle">Pick a model and audio, then use Live or Verify.</string>
 </resources>
