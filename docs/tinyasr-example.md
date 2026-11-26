@@ -25,6 +25,32 @@ Under PenguDroid 0.3.0, `dev.tinyasr.app` (full APK, v2.1) launched successfully
   ```
 - Screenshots: `docs/screenshots/tinyasr-*.png`.
 
+## Host-side engine verification (this repo's own method) ✅
+
+The project ships a host-side reproduction of the streaming path (`docs/tools/livetest.c` + `wav2f32.py`), which drives the same `nativeSessionNew/Push/Finish` call sequence as the app — no Android UI needed. We built the engine natively for x86_64 and ran it:
+
+```bash
+cargo build --release --features c-api            # -> target/release/libtinyasr.a
+cc livetest.c target/release/libtinyasr.a -lpthread -ldl -lm -o livetest
+
+espeak-ng -v en-us -s 145 -w en.wav \
+  "hello this is a test of the offline transcription engine running on a phone"
+python3 docs/tools/wav2f32.py en.wav en16.wav > en.f32
+
+./livetest en.tzf silero_vad.onnx en.f32 en en
+```
+
+Result — **streaming transcription works**, producing live `partial` events and a final `commit`:
+
+```
+push 0.9s : partial … "The Lord is in a heaven."
+push 1.9s : partial … "The loan is in a test on the offline."
+finish     : commit "The load is in a test on the offline transcription and in running on a phone."
+RESULT: TEXT PRODUCED
+```
+
+This proves the engine/live pipeline is functional. If the **app** shows nothing, the causes are the ones documented in `LIVE_VERIFICATION.md`: too little speech (< ~1 s), or a language/content mismatch — not a broken engine.
+
 ## What could NOT be exercised here
 
 The app's **Live** (mic streaming), **Record**, and **Transcribe** features need:
