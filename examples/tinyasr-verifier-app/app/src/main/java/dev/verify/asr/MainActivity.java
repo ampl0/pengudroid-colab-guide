@@ -2,16 +2,18 @@ package dev.verify.asr;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
+import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
-
-import dev.tinyasr.app.TinyAsr;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -24,18 +26,36 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 
-/** Minimal host-style verifier: pick a .tzf model + an audio file, then probe
- *  every pack language and show which one actually produces text. */
+import dev.tinyasr.app.TinyAsr;
+
+/**
+ * tinyasr verifier with a Google-STT-style LIVE experience:
+ *  - "LIVE MIC"  : real-time captions while you speak (AudioRecord -> session).
+ *  - "LIVE FILE" : play a loaded audio file in real time and watch the words
+ *                  stream in, exactly like live captions over playback.
+ *  - "VERIFY"    : whole-file probe across every pack language (diagnostic).
+ */
 public class MainActivity extends Activity {
 
     private static final int RQ_MODEL = 1001;
     private static final int RQ_AUDIO = 1002;
+    private static final int RQ_MIC = 1003;
     private static final int RATE = 16000;
+    private static final int CHUNK = 1600;            // 100 ms at 16 kHz
 
-    private TextView status, result;
-    private Button verifyBtn;
+    private TextView status, result, partial;
+    private Button verifyBtn, liveMicBtn, liveFileBtn;
+
     private File modelFile, vadFile, audioFile;
+    private long models;                               // loaded model handle
+
+    private boolean liveOn;
+    private long liveSession;
+    private final StringBuilder liveCommitted = new StringBuilder();
+    private final List<String> packLangs = new ArrayList<>();
+    private Thread micThread;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,26 +64,55 @@ public class MainActivity extends Activity {
 
         status = findViewById(R.id.status);
         result = findViewById(R.id.result);
+        partial = findViewById(R.id.partial);
         verifyBtn = findViewById(R.id.verifyBtn);
+        liveMicBtn = findViewById(R.id.liveMicBtn);
+        liveFileBtn = findViewById(R.id.liveFileBtn);
 
-        findViewById(R.id.pickModel).setOnClickListener(v ->
-                open("*/*", RQ_MODEL));
-        findViewById(R.id.pickAudio).setOnClickListener(v ->
-                open("audio/*", RQ_AUDIO));
+        findViewById(R.id.pickModel).setOnClickListener(v -> open("*/*", RQ_MODEL));
+        findViewById(R.id.pickAudio).setOnClickListener(v -> open("audio/*", RQ_AUDIO));
         verifyBtn.setOnClickListener(v -> verify());
+        liveMicBtn.setOnClickListener(v -> toggleLiveMic());
+        liveFileBtn.setOnClickListener(v -> liveFile());
 
         vadFile = new File(getCacheDir(), "silero_vad.onnx");
         copyAssetTo("silero_vad.onnx", vadFile);
 
-        // Auto-run hook for headless testing: if a model and audio are already
-        // in the cache dir, verify immediately without needing UI taps.
+        // --- auto-run hooks for headless/CI testing (no UI taps) ---
         File m = new File(getCacheDir(), "model.tzf");
         File a = new File(getCacheDir(), "audio.bin");
+        boolean hasLiveFlag = new File(getCacheDir(), "live.flag").exists();
+        boolean hasVerifyFlag = new File(getCacheDir(), "verify.flag").exists();
         if (m.exists() && a.exists()) {
             modelFile = m;
             audioFile = a;
-            getWindow().getDecorView().post(() -> verify());
+            getWindow().getDecorView().post(() -> {
+                models = loadModels();
+                if (models == 0) return;
+                if (hasLiveFlag) liveFile();
+                else if (hasVerifyFlag) verify();
+            });
         }
+    }
+
+    private long loadModels() {
+        if (models != 0) return models;
+        long h = TinyAsr.nativeLoadPaths(modelFile.getAbsolutePath(),
+                vadFile.getAbsolutePath(), 0);
+        if (h == 0) {
+            status.setText("LOAD FAILED (bad model or VAD)");
+            return 0;
+        }
+        packLangs.clear();
+        int n = TinyAsr.nativeLangCount(h);
+        for (int i = 0; i < n; i++) packLangs.add(TinyAsr.nativeLang(h, i));
+        status.setText("model loaded: langs " + packLangs
+                + " · chunk=" + TinyAsr.nativeChunkMs(h) + "ms");
+        return h;
+    }
+
+    private String defaultLang() {
+        return packLangs.isEmpty() ? "en" : packLangs.get(0);
     }
 
     private void open(String mime, int request) {
@@ -76,9 +125,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
-            return;
-        }
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         File dst = new File(getCacheDir(), requestCode == RQ_MODEL ? "model.tzf" : "audio.bin");
         try (InputStream in = getContentResolver().openInputStream(uri);
@@ -91,22 +138,222 @@ public class MainActivity extends Activity {
             status.setText("copy failed: " + e.getMessage());
             return;
         }
+        models = 0;
         if (requestCode == RQ_MODEL) {
             modelFile = dst;
-            status.setText("model: " + dst.getName() + " (" + dst.length()/1048576 + " MB)");
+            status.setText("model: " + dst.length() / 1048576 + " MB — now pick audio");
         } else {
             audioFile = dst;
-            status.setText("audio: " + dst.getName() + " (" + dst.length()/1024 + " KB)");
+            status.setText("audio: " + dst.length() / 1024 + " KB");
         }
         result.setText("");
+        partial.setText("");
     }
 
+    // ------------------------------------------------------------------ mic --
+
+    private void toggleLiveMic() {
+        if (liveOn) { stopLiveMic(); return; }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, RQ_MIC);
+            return;
+        }
+        startLiveMic();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] gr) {
+        super.onRequestPermissionsResult(code, perms, gr);
+        if (code == RQ_MIC && gr.length > 0 && gr[0] == PackageManager.PERMISSION_GRANTED) {
+            startLiveMic();
+        } else {
+            status.setText("microphone denied");
+        }
+    }
+
+    private void startLiveMic() {
+        models = loadModels();
+        if (models == 0) return;
+        liveOn = true;
+        liveCommitted.setLength(0);
+        result.setText("");
+        partial.setText("");
+        liveSession = TinyAsr.nativeSessionNew(models, defaultLang(), defaultLang(), 0);
+        if (liveSession == 0) { liveOn = false; status.setText("session failed"); return; }
+        status.setText("LIVE (mic) — speak…");
+        verifyBtn.setEnabled(false);
+        liveMicBtn.setText("Stop live");
+        final int minBuf = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+        micThread = new Thread(() -> {
+            AudioRecord rec = new AudioRecord(MediaRecorder.AudioSource.MIC, RATE,
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                    Math.max(minBuf, 8192));
+            try {
+                rec.startRecording();
+                short[] buf = new short[CHUNK];
+                while (liveOn) {
+                    int r = rec.read(buf, 0, CHUNK);
+                    if (r <= 0) continue;
+                    float[] f = new float[r];
+                    for (int i = 0; i < r; i++) f[i] = buf[i] / 32768f;
+                    pushChunk(f, r);
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> status.setText("mic error: " + e.getMessage()));
+            } finally {
+                try { rec.stop(); } catch (Exception ignored) {}
+                rec.release();
+            }
+        });
+        micThread.start();
+    }
+
+    private void stopLiveMic() {
+        liveOn = false;
+        if (micThread != null) {
+            try { micThread.join(2000); } catch (InterruptedException ignored) {}
+            micThread = null;
+        }
+        finishLiveSession();
+    }
+
+    // ------------------------------------------------------------------ file --
+
+    /** Simulate playback of the loaded audio, showing live captions as it goes. */
+    private void liveFile() {
+        models = loadModels();
+        if (models == 0 || audioFile == null) {
+            status.setText("need a model and an audio file first");
+            return;
+        }
+        final float[] pcm;
+        try {
+            pcm = decode(audioFile);
+        } catch (Exception e) {
+            status.setText("decode failed: " + e.getMessage());
+            return;
+        }
+        liveCommitted.setLength(0);
+        result.setText("");
+        partial.setText("");
+        status.setText("LIVE (file) — " + String.format(java.util.Locale.US, "%.1f", pcm.length / 16000.0) + "s");
+        verifyBtn.setEnabled(false);
+        liveFileBtn.setEnabled(false);
+
+        new Thread(() -> {
+            final long session = TinyAsr.nativeSessionNew(models, defaultLang(), defaultLang(), 0);
+            if (session == 0) {
+                runOnUiThread(() -> status.setText("session failed"));
+                return;
+            }
+            for (int off = 0; off < pcm.length && !isFinishing(); off += CHUNK) {
+                int n = Math.min(CHUNK, pcm.length - off);
+                pushChunk(pcm, off, n, session);
+                try { Thread.sleep(90); } catch (InterruptedException e) { break; }  // real-time pace
+            }
+            String fin = TinyAsr.nativeSessionFinish(session);
+            handleEvents(fin);
+            TinyAsr.nativeSessionFree(session);
+            runOnUiThread(() -> {
+                partial.setText("");
+                verifyBtn.setEnabled(true);
+                liveFileBtn.setEnabled(true);
+                status.setText("LIVE (file) done");
+            });
+        }).start();
+    }
+
+    // ------------------------------------------------------------------ push --
+
+    private void pushChunk(float[] f, int n) {
+        long s = liveSession;
+        if (s == 0) return;
+        String json = TinyAsr.nativeSessionPush(s, f, n);
+        if (json != null) handleEvents(json);
+    }
+
+    private void pushChunk(float[] pcm, int off, int n, long session) {
+        float[] sub = new float[n];
+        System.arraycopy(pcm, off, sub, 0, n);
+        String json = TinyAsr.nativeSessionPush(session, sub, n);
+        if (json != null) handleEvents(json);
+    }
+
+    /** Apply a JSON event array: commits append, partials replace the live line. */
+    private void handleEvents(String json) {
+        if (json == null) return;
+        try {
+            final StringBuilder committed = new StringBuilder(liveCommitted.toString());
+            final StringBuilder[] part = {new StringBuilder()};
+            JSONArray arr = new JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String type = o.optString("type");
+                if ("commit".equals(type)) {
+                    JSONArray words = o.optJSONArray("words");
+                    if (words != null) {
+                        for (int k = 0; k < words.length(); k++) {
+                            JSONObject w = words.optJSONObject(k);
+                            if (w == null) continue;
+                            String t = w.optString("text");
+                            if (t.isEmpty()) continue;
+                            if (committed.length() > 0) committed.append(' ');
+                            committed.append(t);
+                        }
+                    }
+                } else if ("partial".equals(type)) {
+                    part[0].setLength(0);
+                    JSONArray open = o.optJSONArray("open");
+                    if (open != null) {
+                        for (int k = 0; k < open.length(); k++) {
+                            JSONObject w = open.optJSONObject(k);
+                            if (w != null && part[0].length() > 0) part[0].append(' ');
+                            if (w != null) part[0].append(w.optString("text"));
+                        }
+                    }
+                }
+            }
+            runOnUiThread(() -> {
+                liveCommitted.setLength(0);
+                liveCommitted.append(committed);
+                result.setText(liveCommitted.toString());
+                partial.setText(part[0].toString());
+            });
+        } catch (Exception e) {
+            // ignore malformed event
+        }
+    }
+
+    private void finishLiveSession() {
+        long s = liveSession;
+        liveSession = 0;
+        if (s != 0) {
+            String fin = TinyAsr.nativeSessionFinish(s);
+            handleEvents(fin);
+            TinyAsr.nativeSessionFree(s);
+        }
+        runOnUiThread(() -> {
+            partial.setText("");
+            verifyBtn.setEnabled(true);
+            liveMicBtn.setText("Live mic");
+            liveFileBtn.setEnabled(true);
+            status.setText(liveCommitted.length() == 0 ? "no text" : "done");
+        });
+    }
+
+    // ------------------------------------------------------------------ verify --
+
     private void verify() {
-        if (modelFile == null || audioFile == null || !vadFile.exists()) {
-            status.setText("Pick a model and an audio file first.");
+        models = loadModels();
+        if (models == 0 || audioFile == null) {
+            status.setText("Pick a model and audio first.");
             return;
         }
         result.setText("working…");
+        partial.setText("");
         new Thread(() -> {
             String out;
             try {
@@ -120,10 +367,6 @@ public class MainActivity extends Activity {
     }
 
     private String runVerify() throws Exception {
-        long models = TinyAsr.nativeLoadPaths(modelFile.getAbsolutePath(),
-                vadFile.getAbsolutePath(), 0);
-        if (models == 0) return "LOAD FAILED (bad model or VAD)";
-
         float[] pcm = decode(audioFile);
         if (pcm.length == 0) return "could not decode audio";
 
@@ -132,21 +375,18 @@ public class MainActivity extends Activity {
           .append("  chunk=").append(TinyAsr.nativeChunkMs(models)).append("ms")
           .append("  audio=").append(String.format(java.util.Locale.US, "%.2f", pcm.length / 16000.0))
           .append("s  langs(pack):");
-        int langs = TinyAsr.nativeLangCount(models);
-        for (int i = 0; i < langs; i++) sb.append(' ').append(TinyAsr.nativeLang(models, i));
+        for (String l : packLangs) sb.append(' ').append(l);
         sb.append("\n");
 
         boolean any = false;
-        for (int i = 0; i < langs; i++) {
-            String lang = TinyAsr.nativeLang(models, i);
+        for (String lang : packLangs) {
             String text = transcribeFile(models, pcm, lang);
             sb.append("  lang ").append(lang).append(" => ")
               .append(text.isEmpty() ? "(empty — no text)" : text).append("\n");
             if (!text.isEmpty()) any = true;
         }
-        TinyAsr.nativeFree(models);
         sb.append("VERDICT: ").append(any
-                ? "TEXT PRODUCED (engine works — in the app pick the language that matches)"
+                ? "TEXT PRODUCED — in the app pick the language that matches"
                 : "NO TEXT for any language — try a longer, clearer recording");
         return sb.toString();
     }
@@ -176,7 +416,7 @@ public class MainActivity extends Activity {
         return sb.toString().trim();
     }
 
-    // --- audio decode helper ------------------------------------------------
+    // ------------------------------------------------------------------ audio --
 
     private static float[] decode(File f) throws Exception {
         byte[] head = new byte[12];

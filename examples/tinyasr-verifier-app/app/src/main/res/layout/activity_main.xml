@@ -25,6 +25,18 @@
         android:text="@string/pick_audio" />
 
     <Button
+        android:id="@+id/liveMicBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/live_mic" />
+
+    <Button
+        android:id="@+id/liveFileBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/live_file" />
+
+    <Button
         android:id="@+id/verifyBtn"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -37,6 +49,14 @@
         android:text="@string/status_idle"
         android:textSize="13sp" />
 
+    <TextView
+        android:id="@+id/partial"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#0a7d0a"
+        android:textSize="16sp"
+        android:textStyle="italic" />
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -48,6 +68,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
-            android:textSize="12sp" />
+            android:textSize="13sp" />
     </ScrollView>
 </LinearLayout>
