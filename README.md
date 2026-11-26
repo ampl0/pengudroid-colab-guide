@@ -4,7 +4,9 @@
 
 **Run nearly any Android app (APK) as a native Linux process — no Android VM, no container, no root, no KVM — and capture real screenshots from a headless server like Google Colab.**
 
-A generic, reproducible field guide. Verified against **PenguDroid 0.3.0**, with **YTCache 1.2.0** as one worked example (a WebView app that exercises the whole pipeline).
+A generic, reproducible field guide. Verified against **PenguDroid 0.3.0** with two worked examples:
+- **YTCache 1.2.0** — a WebView app (exercises the WebView provider path).
+- **tinyasr 2.1** — an **arm64-only** native app (exercises the Berberis ARM64 translator).
 
 ![Platform](https://img.shields.io/badge/platform-Linux%20x86__64-3DDC84) ![Runtime](https://img.shields.io/badge/Android_17-API_37-1082c8) ![License](https://img.shields.io/badge/license-MIT-green) ![AI-ready](https://img.shields.io/badge/AI_agent-guide-purple)
 
@@ -72,6 +74,7 @@ PenguDroid runs each app as an **ordinary Linux process** on Android's real ART 
 ├── docs/
 │   ├── environment.md     # headless/Colab environment setup
 │   ├── webview-provider.md# how to extract & install Android System WebView
+│   ├── tinyasr-example.md # worked example: ARM64-only app via Berberis
 │   └── limitations.md     # known hard limits and evidence
 └── scripts/
     ├── setup_headless.sh  # headless Wayland (sway) + software GL
@@ -153,7 +156,7 @@ The whole method is generic. To bring your own app:
 3. **Common per-app needs** (add as needed):
    - **Pure Java/Kotlin apps** → usually "just work".
    - **WebView apps** (YouTube wrappers, WebViews, many games' login) → need the WebView provider (step 3 / `docs/webview-provider.md`).
-   - **ARM64-only native libs** → need PenguDroid's native-bridge/translator (mostly not verified here; check upstream).
+   - **ARM64-only native libs** → need PenguDroid's native-bridge/translator (Berberis). **Verified working** with tinyasr 2.1 — see `docs/tinyasr-example.md`.
    - **Google Play / GMS-dependent apps** → generally unsupported (no Play services).
 4. **Validate** — confirm the process stays alive, then read the rendered frames (OCR/pixels) to confirm the UI reached the expected screen.
 
@@ -200,7 +203,7 @@ See **scripts/capture_frames.sh** and **docs/environment.md**.
 | Input injection on headless | `tap`/`key` are `Ack`'d but **not delivered** — needs a compositor input focus |
 | No GPU ⇒ no visible window | `eglSwapBuffers` fails dmabuf export; still screenshots via frame dump |
 | Google Play / GMS | Not available |
-| ARM64 native libs | Translator is unverified in this guide |
+| ARM64 native libs | Translator (Berberis) works — verified with tinyasr 2.1; treat other apps as best-effort |
 | Site consent gates | WebView-based apps will show the real site (e.g. Google consent) before content |
 
 Full list with evidence: **docs/limitations.md**.
