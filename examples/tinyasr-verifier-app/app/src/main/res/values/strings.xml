@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">tinyasr verifier</string>
+    <string name="pick_model">Pick model (.tzf)</string>
+    <string name="pick_audio">Pick audio</string>
+    <string name="verify">Verify (auto languages)</string>
+    <string name="status_idle">Pick a model and audio, then Verify.</string>
+</resources>
