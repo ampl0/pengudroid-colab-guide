@@ -12,7 +12,9 @@ import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import org.json.JSONArray;
@@ -47,6 +49,7 @@ public class MainActivity extends Activity {
 
     private TextView status, result, partial;
     private Button verifyBtn, liveMicBtn, liveFileBtn;
+    private Spinner langView;
 
     private File modelFile, vadFile, audioFile;
     private long models;                               // loaded model handle
@@ -56,6 +59,7 @@ public class MainActivity extends Activity {
     private final StringBuilder liveCommitted = new StringBuilder();
     private final List<String> packLangs = new ArrayList<>();
     private Thread micThread;
+    private static final String AUTO = "auto (detect)";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,6 +72,7 @@ public class MainActivity extends Activity {
         verifyBtn = findViewById(R.id.verifyBtn);
         liveMicBtn = findViewById(R.id.liveMicBtn);
         liveFileBtn = findViewById(R.id.liveFileBtn);
+        langView = findViewById(R.id.lang);
 
         findViewById(R.id.pickModel).setOnClickListener(v -> open("*/*", RQ_MODEL));
         findViewById(R.id.pickAudio).setOnClickListener(v -> open("audio/*", RQ_AUDIO));
@@ -106,13 +111,45 @@ public class MainActivity extends Activity {
         packLangs.clear();
         int n = TinyAsr.nativeLangCount(h);
         for (int i = 0; i < n; i++) packLangs.add(TinyAsr.nativeLang(h, i));
+        // Populate the language dropdown: "auto" first, then pack languages.
+        List<String> opts = new ArrayList<>(packLangs);
+        opts.add(0, AUTO);
+        langView.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, opts));
+        // Default to the pack's first NON-English language (English is the
+        // shared block of every pack and often a wrong default for other langs).
+        int sel = opts.size() > 1 ? 1 : 0; // first real language
+        for (int i = 1; i < opts.size(); i++) {
+            String c = opts.get(i).toLowerCase(java.util.Locale.ROOT);
+            if (!c.equals("en") && !c.equals("eng")) { sel = i; break; }
+        }
+        langView.setSelection(sel);
         status.setText("model loaded: langs " + packLangs
                 + " · chunk=" + TinyAsr.nativeChunkMs(h) + "ms");
         return h;
     }
 
-    private String defaultLang() {
-        return packLangs.isEmpty() ? "en" : packLangs.get(0);
+    /** Language the user selected ("auto", or a code like "fa"). */
+    private String selectedLang() {
+        Object item = langView.getSelectedItem();
+        if (item == null) return AUTO;
+        return String.valueOf(item);
+    }
+
+    /** langs + startLang for the session. null start = let the engine decide. */
+    private String[] sessionLangs() {
+        String sel = selectedLang();
+        if (AUTO.equals(sel)) {
+            StringBuilder sb = new StringBuilder();
+            for (String l : packLangs) { if (sb.length() > 0) sb.append(','); sb.append(l); }
+            return new String[]{ sb.length() == 0 ? null : sb.toString(), null };
+        }
+        return new String[]{ sel, sel };
+    }
+
+    private long createSession() {
+        String[] ls = sessionLangs();
+        return TinyAsr.nativeSessionNew(models, ls[0], ls[1], 0);
     }
 
     private void open(String mime, int request) {
@@ -179,9 +216,9 @@ public class MainActivity extends Activity {
         liveCommitted.setLength(0);
         result.setText("");
         partial.setText("");
-        liveSession = TinyAsr.nativeSessionNew(models, defaultLang(), defaultLang(), 0);
+        liveSession = createSession();
         if (liveSession == 0) { liveOn = false; status.setText("session failed"); return; }
-        status.setText("LIVE (mic) — speak…");
+        status.setText("LIVE (mic) — " + selectedLang() + " — speak…");
         verifyBtn.setEnabled(false);
         liveMicBtn.setText("Stop live");
         final int minBuf = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
@@ -238,12 +275,13 @@ public class MainActivity extends Activity {
         liveCommitted.setLength(0);
         result.setText("");
         partial.setText("");
-        status.setText("LIVE (file) — " + String.format(java.util.Locale.US, "%.1f", pcm.length / 16000.0) + "s");
+        status.setText("LIVE (file) — " + selectedLang() + " — "
+                + String.format(java.util.Locale.US, "%.1f", pcm.length / 16000.0) + "s");
         verifyBtn.setEnabled(false);
         liveFileBtn.setEnabled(false);
 
         new Thread(() -> {
-            final long session = TinyAsr.nativeSessionNew(models, defaultLang(), defaultLang(), 0);
+            final long session = createSession();
             if (session == 0) {
                 runOnUiThread(() -> status.setText("session failed"));
                 return;

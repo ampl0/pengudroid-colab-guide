@@ -24,6 +24,17 @@
         android:layout_height="wrap_content"
         android:text="@string/pick_audio" />
 
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/language_label"
+        android:textSize="13sp" />
+
+    <Spinner
+        android:id="@+id/lang"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
     <Button
         android:id="@+id/liveMicBtn"
         android:layout_width="match_parent"

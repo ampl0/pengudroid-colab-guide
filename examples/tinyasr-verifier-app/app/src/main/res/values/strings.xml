@@ -6,5 +6,6 @@
     <string name="live_mic">Live mic — speak</string>
     <string name="live_file">Live from file — watch words</string>
     <string name="verify">Verify (auto languages)</string>
+    <string name="language_label">Language for live/stream</string>
     <string name="status_idle">Pick a model and audio, then use Live or Verify.</string>
 </resources>
