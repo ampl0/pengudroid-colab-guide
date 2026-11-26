@@ -1,6 +1,6 @@
 # Installing the Android System WebView provider
 
-Many modern Android apps (including `com.ytcache.app`) require a working **WebView** (Chromium). PenguDroid's shipped runtime **omits** the WebView APK, so apps crash with:
+Many modern Android apps (e.g. YouTube wrappers, WebView-based apps, many games' login screens — including `com.ytcache.app`) require a working **WebView** (Chromium). PenguDroid's shipped runtime **omits** the WebView APK, so such apps crash with:
 
 ```
 Caused by: java.lang.UnsupportedOperationException

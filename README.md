@@ -1,12 +1,12 @@
 <div align="center">
 
-# 🐧 PenguDroid on Colab / Headless — Field Guide
+# 🐧 PenguDroid on Colab / Headless — Run Any Android App
 
-**Run ` Android apps (APK) as native Linux processes — no Android VM, no container, no root — and capture real screenshots from a headless server like Google Colab.**
+**Run nearly any Android app (APK) as a native Linux process — no Android VM, no container, no root, no KVM — and capture real screenshots from a headless server like Google Colab.**
 
-Built and verified against **PenguDroid 0.3.0** + **YTCache 1.2.0** (the *app used as the test harness for this guide).
+A generic, reproducible field guide. Verified against **PenguDroid 0.3.0**, with **YTCache 1.2.0** as one worked example (a WebView app that exercises the whole pipeline).
 
-![Platform](https://img.shields.io/badge/platform-Linux%20x86__64-3DDC84) ![Runtime](https://img.shields.io/badge/Android_17-API_37-1082c8) ![AppImage](https://img.shields.io/badge/AppImage-0.3.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![AI-ready](https://img.shields.io/badge/AI_agent-guide-purple)
+![Platform](https://img.shields.io/badge/platform-Linux%20x86__64-3DDC84) ![Runtime](https://img.shields.io/badge/Android_17-API_37-1082c8) ![License](https://img.shields.io/badge/license-MIT-green) ![AI-ready](https://img.shields.io/badge/AI_agent-guide-purple)
 
 </div>
 
@@ -20,6 +20,7 @@ Built and verified against **PenguDroid 0.3.0** + **YTCache 1.2.0** (the *app us
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
+- [Testing any APK](#testing-any-apk)
 - [The WebView blocker (important)](#the-webview-blocker)
 - [Headless + screenshots](#headless--screenshots)
 - [Known limitations](#known-limitations)
@@ -32,23 +33,23 @@ Built and verified against **PenguDroid 0.3.0** + **YTCache 1.2.0** (the *app us
 
 ## What this is
 
-This repository is a **reproducible, hand-verified guide** for running modern Android apps on a server-grade, **headless** Linux box (e.g. a Google Colab notebook or a low-spec container) using [**PenguDroid**](https://github.com/denizomer10/PenguDroid).
+This repository is a **reproducible, hand-verified guide** for running modern Android apps on a server-grade, **headless** Linux box (e.g. a Google Colab notebook or a container) using [**PenguDroid**](https://github.com/denizomer10/PenguDroid).
 
-It documents:
+It covers:
 
-- How to install PenguDroid (AppImage → self-contained Android 17 / API-37 runtime).
-- How to install an APK the "correct" way (read-only, non-root).
-- How to fix the **WebView provider** — the single most common blocker, since shipped runtimes omit the Android System WebView.
-- How to produce **real screenshots from a headless host** (no GPU, no display) using PenguDroid's built-in framebuffer dump.
-- What actually works and what does **not** work without a GPU (so future agents don't waste time).
+- Installing PenguDroid (AppImage → self-contained Android 17 / API-37 runtime).
+- Installing **any APK** the "correct" way (read-only, non-root).
+- Fixing the **WebView provider** — the single most common blocker for "web" apps, since shipped runtimes omit the Android System WebView.
+- Producing **real screenshots from a headless host** (no GPU, no display).
+- How to run, inspect, and validate **whichever app you bring**.
 
-The example target app is **YTCache** (`com.ytcache.app`, v1.2.0) — an Android app that plays YouTube in a WebView and caches media segments for offline playback. It is a good stress test because it requires a working WebView.
+The method is app-agnostic: swap in your APK. YTCache is documented as a real, working example.
 
 ---
 
 ## Why PenguDroid
 
-Unlike an Android emulator, PenguDroid runs each app as an **ordinary Linux process** on Android's real ART runtime and framework — no full OS boot, no KVM, no nested virtualization.
+PenguDroid runs each app as an **ordinary Linux process** on Android's real ART runtime and framework — no full OS boot, no KVM, no nested virtualization.
 
 | Aspect | Android Emulator | PenguDroid |
 |---|---|---|
@@ -74,7 +75,7 @@ Unlike an Android emulator, PenguDroid runs each app as an **ordinary Linux proc
 │   └── limitations.md     # known hard limits and evidence
 └── scripts/
     ├── setup_headless.sh  # headless Wayland (sway) + software GL
-    ├── launch_ytcache.sh  # launch ARTCache with the working WebView flags
+    ├── launch_app.sh       # launch ANY APK with the working WebView flags
     └── capture_frames.sh  # grab screenshots via framebuffer dump
 ```
 
@@ -86,7 +87,7 @@ Unlike an Android emulator, PenguDroid runs each app as an **ordinary Linux proc
 - A **non-root** user account (PenguDroid refuses to run apps as root).
 - ~5 GB free disk for the runtime (origin ~2.3 GB).
 - A **Wayland** compositor. On a desktop this is your normal session; on Colab we run a headless `sway`.
-- GPU drivers are **recommended** to show windows; **software rendering (llvmpipe)** is enough to run and screenshot (details below).
+- GPU drivers are **recommended** to show windows; **software rendering (llvmpipe)** is enough to run and screenshot.
 
 ---
 
@@ -103,15 +104,15 @@ sudo -u "$USER" bash scripts/setup_headless.sh
 # 3. (Required for WebView apps) install the Android System WebView provider
 #     see docs/webview-provider.md
 
-# 4. Install your APK read-only
-sudo mkdir -p /opt/apks && sudo cp app.apk /opt/apks/ && sudo chmod 444 /opt/apks/app.apk
+# 4. Install your APK read-only — any app will work
+sudo mkdir -p /opt/apks && sudo cp your-app.apk /opt/apks/ && sudo chmod 444 /opt/apks/your-app.apk
 
 # 5. Launch
 PENGUDROID_WEBVIEW=1 \
 PENGUDROID_WEBVIEW_SINGLE_PROCESS=1 \
 PENGUDROID_WEBVIEW_SOFTWARE=1 \
 PENGUDROID_FRAMEWORK_LOOPER=1 \
-./PenguDroid-0.3.0-x86_64.AppImage --cli launch /opt/apks/app.apk
+./PenguDroid-0.3.0-x86_64.AppImage --cli launch /opt/apks/your-app.apk
 ```
 
 Full, verbose instructions: **docs/environment.md** and **docs/webview-provider.md**.
@@ -139,18 +140,39 @@ PenguDroid's `pengudroid` CLI:
 
 ---
 
+## Testing any APK
+
+The whole method is generic. To bring your own app:
+
+1. **Inspect it first** — this tells you what it needs (ABIs, SDK, permissions, services):
+   ```bash
+   ./PenguDroid-0.3.0-x86_64.AppImage --cli info my-app.apk
+   ./PenguDroid-0.3.0-x86_64.AppImage --cli doctor my-app.apk
+   ```
+2. **Install it read-only** and launch with `scripts/launch_app.sh` (add `DUMP_FRAMES=/tmp/frames` to screenshot it).
+3. **Common per-app needs** (add as needed):
+   - **Pure Java/Kotlin apps** → usually "just work".
+   - **WebView apps** (YouTube wrappers, WebViews, many games' login) → need the WebView provider (step 3 / `docs/webview-provider.md`).
+   - **ARM64-only native libs** → need PenguDroid's native-bridge/translator (mostly not verified here; check upstream).
+   - **Google Play / GMS-dependent apps** → generally unsupported (no Play services).
+4. **Validate** — confirm the process stays alive, then read the rendered frames (OCR/pixels) to confirm the UI reached the expected screen.
+
+Example we verified end-to-end: **YTCache 1.2.0** (`com.ytcache.app`) — launches, initializes Chromium, and loads `https://m.youtube.com`.
+
+---
+
 ## The WebView blocker
 
-**Symptom:** the app launches but crashes on `android.webkit.WebView` with:
+**Symptom:** the app crashes on `android.webkit.WebView` with:
 
 ```
 java.lang.UnsupportedOperationException
     at android.webkit.WebViewFactory.getProvider(WebViewFactory.java:351)
 ```
 
-**Cause:** the shipped PenguDroid runtime **omits the Android System WebView APK** (`com.android.webview`) and the provider loading contract — but many modern apps (YTCache, and others) need it.
+**Cause:** the shipped PenguDroid runtime **omits the Android System WebView APK** (`com.android.webview`) and the provider loading contract — but many modern apps need it.
 
-**Fix:** extract the *real* `com.android.webview` from Google's official API-37 system image and place it into the runtime tree. See **docs/webview-provider.md** for the exact, fully-tested procedure (it uses `lpunpack` + `debugfs` on the official `system-images;android-37.0;default;x86_64` image).
+**Fix:** extract the *real* `com.android.webview` from Google's official API-37 system image and place it into the runtime tree. See **docs/webview-provider.md** (uses `lpunpack` + `debugfs` on `system-images;android-37.0;default;x86_64`).
 
 ---
 
@@ -161,7 +183,7 @@ On a GPU-less host the app's window cannot be *presented* to a compositor, but P
 ```bash
 PENGUDROID_DUMP_FRAME=/tmp/frames/frame.ppm \
 PENGUDROID_DUMP_FRAME_EVERY=3 \
-./PenguDroid-0.3.0-x86_64.AppImage --cli launch /opt/apks/app.apk
+./PenguDroid-0.3.0-x86_64.AppImage --cli launch /opt/apks/your-app.apk
 # → /tmp/frames/frame.s0frameN.ppm   (720x1280 RGBA readback)
 ```
 
@@ -171,16 +193,17 @@ See **scripts/capture_frames.sh** and **docs/environment.md**.
 
 ## Known limitations
 
-| Limitation | Evidence / detail |
+| Limitation | Detail |
 |---|---|
 | No sandbox | Apps run as your user; trusted APKs only |
 | WebView not shipped | Must install provider (see docs) |
-| Input injection on headless | `tap`/`key` are `Ack`'d but **not delivered** — the daemon needs a compositor input focus, which headless has no pointer for |
+| Input injection on headless | `tap`/`key` are `Ack`'d but **not delivered** — needs a compositor input focus |
 | No GPU ⇒ no visible window | `eglSwapBuffers` fails dmabuf export; still screenshots via frame dump |
-| YouTube consent gate | The WebView loads the real site, so Google's cookie-consent page appears first |
-| Capture requires live playback | YTCache only records media segments *while* a video plays (MSE tee); idle app produces no capture files |
+| Google Play / GMS | Not available |
+| ARM64 native libs | Translator is unverified in this guide |
+| Site consent gates | WebView-based apps will show the real site (e.g. Google consent) before content |
 
-The full list with verification notes is in **docs/limitations.md**.
+Full list with evidence: **docs/limitations.md**.
 
 ---
 
@@ -190,7 +213,7 @@ The full list with verification notes is in **docs/limitations.md**.
 |---|---|
 | `Writable dex file … is not allowed` | make the APK read-only: `chmod 444` |
 | `process-identity: … host UID is root` | run as a non-root user |
-| `Failed to open APK '/system/product/app/webview/webview.apk'` | follow **docs/webview-provider.md** for the symlinks |
+| `Failed to open APK '/system/product/app/webview/webview.apk'` | follow **docs/webview-provider.md** (symlinks) |
 | `webview: framework rejected provider APK` | wrong/unsigned WebView APK; re-extract |
 
 More in **docs/limitations.md** and **AGENTS.md**.
@@ -199,13 +222,13 @@ More in **docs/limitations.md** and **AGENTS.md**.
 
 ## For AI agents
 
-A dedicated, self-contained reproduction guide lives in **AGENTS.md** — written so an LLM coding agent (or a future visitor) can reproduce the whole environment from a bare container, including acceptance checks.
+A dedicated, self-contained reproduction guide lives in **AGENTS.md** — written so an LLM coding agent (or a future visitor) can reproduce the whole environment from a bare container for **any app**, including acceptance checks.
 
 ---
 
 ## Keywords
 
-`pengudroid`, `android`, `apk`, `android-on-linux`, `run android apps on linux`, `colab`, `google colab`, `headless`, `headless android`, `android emulator alternative`, `emulator`, `appimage`, `art`, `android 17`, `api 37`, `webview`, `chromium`, `com.android.webview`, `lpunpack`, `system image`, `software rendering`, `llvmpipe`, `sway`, `wayland`, `screenshots`, `framebuffer`, `ytcache`, `youtube cache`, `mse`, `media source extensions`, `offline video`, `automation`, `ai agent`, `ci`, `testing`, `gui testing`, `android testing`
+`pengudroid`, `android`, `apk`, `android-on-linux`, `run android apps on linux`, `colab`, `google colab`, `headless`, `headless android`, `android emulator alternative`, `emulator`, `appimage`, `art`, `android 17`, `api 37`, `webview`, `chromium`, `com.android.webview`, `lpunpack`, `system image`, `software rendering`, `llvmpipe`, `sway`, `wayland`, `screenshots`, `framebuffer`, `ytcache`, `youtube cache`, `mse`, `media source extensions`, `offline video`, `automation`, `ai agent`, `ci`, `testing`, `gui testing`, `android testing`, `apk testing`, `arbitrary apps`
 
 ---
 

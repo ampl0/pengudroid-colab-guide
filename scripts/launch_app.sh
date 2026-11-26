@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Launch YTCache (or any WebView app) in PenguDroid with the working flags.
-# Usage: bash scripts/launch_ytcache.sh /opt/apks/app.apk
+# Launch any Android APK in PenguDroid with the working WebView flags.
+# Usage: bash scripts/launch_app.sh /opt/apks/app.apk
 set -euo pipefail
 
-APK="${1:?usage: launch_ytcache.sh <app.apk>}"
+APK="${1:?usage: launch_app.sh <app.apk>}"
 APPIMAGE="${APPIMAGE:-/opt/PenguDroid-0.3.0-x86_64.AppImage}"
 
 export HOME="${HOME:-/home/$USER}"

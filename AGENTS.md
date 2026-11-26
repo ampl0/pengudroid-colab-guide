@@ -10,8 +10,8 @@ You are done when **all** of these hold:
 
 1. `pengudroid --cli --version` prints `0.3.0`.
 2. `pengudroid runtime --status` reports an installed **Android 17 / API-37** modular runtime.
-3. An APK (profile `com.ytcache.app`) **launches** and stays alive (`ps` shows the process).
-4. The app's WebView shows real site content — verified by reading the rendered frame (OCR or pixel analysis) for the YouTube consent page, i.e. `https://m.youtube.com` is reached.
+3. An APK of your choice (example used in this guide: `com.ytcache.app`) **launches** and stays alive (`ps` shows the process).
+4. If the app uses a WebView, it shows real site content — verified by reading the rendered frame (OCR or pixel analysis). In the worked example this is Google's consent page, i.e. `https://m.youtube.com` is reached.
 5. Screenshots are produced as PNG from `PENGUDROID_DUMP_FRAME` PPM output.
 
 You do **not** need a GPU or a visible window to pass; software rendering + frame dump is enough.
@@ -139,7 +139,7 @@ sudo install -m 444 app.apk /opt/apks/app.apk
 
 ---
 
-## 7. Launch YTCache with WebView flags
+## 7. Launch your app with WebView flags
 
 ```bash
 sudo -u pengu bash -c '
@@ -190,7 +190,7 @@ tesseract shot.png stdout                     # read the screen
 4. **No input injection headless.** `pengudroid tap/key` return `Ack` but the daemon never logs `subscribed to input` — the compositor has no pointer focus. Do not rely on scripted clicks in a headless container.
 5. **No GPU ⇒ no visible window**, but `PENGUDROID_DUMP_FRAME` still yields real rendered frames.
 6. **YouTube consent gate.** The WebView reaches the real site; Google's consent page appears before content. Treat any "still on consent" frame as *expected*, not a failure.
-7. **Capture is video-only.** YTCache writes capture files only *while a video plays*; an idle app yields no `YTCache/<videoId>/` output. To observe data files you must get past consent + play a video (requires a real, interactive host).
+7. **Capture is app-specific.** YTCache (the example) writes capture files only *while a video plays*; an idle app yields no `YTCache/<videoId>/` output. To observe those data files you must get past consent + play a video (requires a real, interactive host). For your own app, decide what "working" means and verify that specifically.
 
 ---
 
